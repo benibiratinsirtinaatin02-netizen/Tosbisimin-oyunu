@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Tosbik'in 18. Yaş Macerası – Final</title>
+<style>
+  :root{--pink:#ff66cc;--light:#ffd1f0}
+  body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#fff0fb;display:flex;align-items:center;justify-content:center;min-height:100vh}
+  #gameContainer{width:100%;max-width:980px;padding:10px;box-sizing:border-box;position:relative}
+  canvas{display:block;width:100%;height:auto;background:#a0d8ff;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.15)}
+  /* Start Screen */
+  #startScreen{position:fixed;inset:0;background:linear-gradient(180deg,#fff0fb,#ffdff6);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:200}
+  #startScreen h1{font-size:clamp(26px,4vw,48px);color:var(--pink);margin:0 0 10px}
+  #startScreen p{color:#444;max-width:540px;margin:0 0 20px}
+  .btn{padding:12px 28px;border:none;border-radius:14px;background:var(--pink);color:#fff;font-size:18px;cursor:pointer}
+  /* End Screen */
+  #endScreen{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;z-index:300}
+  #endCard{background:#fff;padding:20px;border-radius:18px;width:90%;max-width:680px;text-align:center}
+  /* Controls */
+  #controls{position:fixed;left:0;right:0;bottom:18px;display:flex;justify-content:space-around;pointer-events:auto;z-index:220}
+  #controls button{width:72px;height:72px;border-radius:50%;border:none;font-size:20px;background:#ffb3da}
+  /* HUD */
+  #hud{position:fixed;top:12px;left:12px;font-size:18px;color:#fff;text-shadow:2px 2px 4px #000;font-weight:bold;z-index:250;background:rgba(0,0,0,0.25);padding:6px 10px;border-radius:12px}
+  @media (min-width:900px){ #controls{max-width:600px;margin:0 auto;left:0;right:0} }
+</style>
+</head>
+<body>
+
+<div id="startScreen">
+  <h1>Tosbik'in 18. Yaş Macerası</h1>
+  <p>Daha uzun, engellerle dolu ve kalpler toplayacağın tatlı bir doğum günü oyunu! Mobil için dokunmatik kontroller mevcut. Başlamak için dokun.</p>
+  <button class="btn" id="startBtn">Başla</button>
+</div>
+
+<div id="gameContainer" aria-hidden="false">
+  <div id="hud">⏱ 0 &nbsp;&nbsp; | &nbsp;&nbsp; ❤️ 0</div>
+  <canvas id="game" width="1000" height="520"></canvas>
+</div>
+
+<!-- Mobile Touch Controls -->
+<div id="controls" aria-hidden="false">
+  <button id="leftBtn" aria-label="sol">◀</button>
+  <button id="jumpBtn" aria-label="zıpla">⤒</button>
+  <button id="rightBtn" aria-label="sağ">▶</button>
+</div>
+
+<!-- End Screen Modal -->
+<div id="endScreen" role="dialog" aria-modal="true">
+  <div id="endCard">
+    <h2>Sevgili Tosbik,</h2>
+    <p style="line-height:1.4">Veledlikten çıkıyor olmanı kutluyorum ve bir yandan üzülmüyor değilim. Umarım oyunu beğenmişsindir.<br>
+    Seni çok çok öpüyorum. İyi ki varsın doğum günün kutlu olsunnnnn &lt;3</p>
+    <div style="display:flex;gap:12px;justify-content:center;align-items:center;margin-top:12px">
+      <img src="https://media.tenor.com/2roX3uxz_68AAAAC/cute-kawaii.gif" width="110" alt="cute"/>
+      <img src="https://media.tenor.com/3ZFmSp3W6iAAAAAC/kiss-love.gif" width="110" alt="kiss"/>
+      <img src="https://media.tenor.com/bCfpwMjfAi0AAAAC/cute-kiss.gif" width="110" alt="kiss2"/>
+    </div>
+    <div style="margin-top:18px">
+      <button class="btn" id="replayBtn">Tekrar Oyna</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ========= Game constants ========= */
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let W = canvas.width, H = canvas.height;
+
+/* Player */
+let player = { x: 60, y: 360, w:36, h:52, vy:0, onGround:false };
+
+/* Map and terrain */
+const segmentWidth = 480;
+const groundHeights = [420,380,360,400,340,380,360,390,350,360]; // variable ground heights
+let scrollX = 0;
+
+/* Obstacles */
+let obstacles = [];
+for(let i=1;i<groundHeights.length;i++){
+  obstacles.push({
+    x: i*segmentWidth + 160,
+    y: groundHeights[i] - 40,
+    w:50, h:40
+  });
+}
+
+/* Hearts to collect */
+let hearts = [];
+for(let i=0;i<9;i++){
+  hearts.push({
+    x: i*segmentWidth + 260,
+    y: groundHeights[i] - 110,
+    r:12,
+    taken:false
+  });
+}
+
+/* Gift at end */
+let gift = { x: segmentWidth*(groundHeights.length-1) + 300, y: groundHeights[groundHeights.length-1] - 80, w:64, h:64, explode:false, frame:0 };
+
+/* HUD */
+let timeSec = 0;
+let heartsCollected = 0;
+let timerRunning = false;
+
+/* Audio */
+const bgMusic = new Audio('https://cdn.pixabay.com/download/audio/2022/03/15/audio_6df113c6e2.mp3?filename=romantic-love-113508.mp3');
+bgMusic.loop = true; bgMusic.volume = 0.45;
+
+/* Start / end */
+const startScreen = document.getElementById('startScreen');
+const startBtn = document.getElementById('startBtn');
+const endScreen = document.getElementById('endScreen');
+const replayBtn = document.getElementById('replayBtn');
+const hud = document.getElementById('hud');
+
+startBtn.addEventListener('click', ()=>{
+  startScreen.style.display = 'none';
+  timerRunning = true;
+  try{ bgMusic.play(); }catch(e){}
+  setInterval(()=>{ if(timerRunning) timeSec++; hud.textContent = `⏱ ${timeSec}  |  ❤️ ${heartsCollected}`; },1000);
+});
+
+/* Controls */
+let keys = {};
+document.addEventListener('keydown', e=> keys[e.key]=true);
+document.addEventListener('keyup', e=> keys[e.key]=false);
+
+/* Mobile buttons */
+const leftBtn = document.getElementById('leftBtn');
+const rightBtn = document.getElementById('rightBtn');
+const jumpBtn = document.getElementById('jumpBtn');
+leftBtn.addEventListener('touchstart', e=>{ e.preventDefault(); keys['ArrowLeft']=true; });
+leftBtn.addEventListener('touchend', e=>{ e.preventDefault(); keys['ArrowLeft']=false; });
+rightBtn.addEventListener('touchstart', e=>{ e.preventDefault(); keys['ArrowRight']=true; });
+rightBtn.addEventListener('touchend', e=>{ e.preventDefault(); keys['ArrowRight']=false; });
+jumpBtn.addEventListener('touchstart', e=>{ e.preventDefault(); if(player.onGround){ player.vy = -16; player.onGround=false; } });
+
+/* Prevent scrolling when touching controls */
+['touchstart','touchmove'].forEach(ev=>{
+  document.getElementById('controls').addEventListener(ev, e=> e.preventDefault(), {passive:false});
+});
+
+/* Draw background decorations: turtles and cakes tiled */
+function drawDecor(){
+  for(let i=0;i<12;i++){
+    const xx = -scrollX + i*300;
+    // turtle shell
+    ctx.fillStyle = '#2e8b57';
+    ctx.fillRect(xx + 40, 280, 60, 28);
+    ctx.fillStyle = '#1f5e2f';
+    ctx.fillRect(xx + 70, 268, 18, 18);
+    // cake
+    ctx.fillStyle = '#ffd1e6';
+    ctx.fillRect(xx + 190, 250, 70, 44);
+    ctx.fillStyle = '#ff89b4';
+    ctx.fillRect(xx + 190, 240, 70, 10);
+    // small candle
+    ctx.fillStyle = '#ffd27f';
+    ctx.fillRect(xx + 222, 232, 6, 10);
+  }
+}
+
+/* Improved player drawing (more personality) */
+function drawPlayer(){
+  const px = player.x - scrollX;
+  // body (blue top)
+  ctx.fillStyle = '#2b6cff';
+  ctx.fillRect(px, player.y, player.w, player.h*0.55);
+  // pants (black)
+  ctx.fillStyle = '#111';
+  ctx.fillRect(px, player.y + player.h*0.55, player.w, player.h*0.45);
+  // face
+  ctx.fillStyle = '#f2d6c8';
+  ctx.fillRect(px, player.y - 14, player.w, 14);
+  // curly hair - draw small curls
+  ctx.fillStyle = '#4b3220';
+  for(let i=0;i<4;i++){
+    ctx.beginPath();
+    ctx.arc(px + 6 + i*8, player.y - 16, 5, 0, Math.PI*2);
+    ctx.fill();
+  }
+  // eyes
+  ctx.fillStyle = '#2a2a2a';
+  ctx.fillRect(px+8, player.y-10, 4,4);
+  ctx.fillRect(px+20, player.y-10, 4,4);
+}
+
+/* Draw YOU (pink top, bangs, green eyes) beside gift */
+function drawYou(){
+  const x = gift.x - scrollX - 90;
+  const y = gift.y - 10;
+  ctx.fillStyle = '#ff99cc'; ctx.fillRect(x, y, 32, 40); // top
+  ctx.fillStyle = '#000'; ctx.fillRect(x, y+40, 32, 20); // bottom
+  ctx.fillStyle = '#deb7a0'; ctx.fillRect(x, y-22, 32, 18); // face
+  // bangs
+  ctx.fillStyle = '#b8896f'; ctx.fillRect(x+2, y-22, 28, 6);
+  // green eyes (tiny)
+  ctx.fillStyle = '#2fb76e'; ctx.fillRect(x+8, y-14, 4,4); ctx.fillRect(x+20, y-14,4,4);
+}
+
+/* Draw terrain segments */
+function drawTerrain(){
+  for(let i=0;i<groundHeights.length;i++){
+    const gh = groundHeights[i];
+    const x = i*segmentWidth - scrollX;
+    ctx.fillStyle = '#57b463';
+    ctx.fillRect(x, gh, segmentWidth + 2, H - gh);
+    // add some simple platform edges
+    ctx.fillStyle = '#4aa256';
+    ctx.fillRect(x, gh-6, segmentWidth, 6);
+  }
+}
+
+/* Obstacles */
+function drawObstacles(){
+  ctx.fillStyle = '#7b3f00';
+  obstacles.forEach(o=>{
+    ctx.fillRect(o.x - scrollX, o.y, o.w, o.h);
+    // little spikes on obstacle
+    ctx.fillStyle = '#552a00';
+    ctx.beginPath();
+    ctx.moveTo(o.x - scrollX, o.y);
+    ctx.lineTo(o.x - scrollX + o.w/2, o.y - 12);
+    ctx.lineTo(o.x - scrollX + o.w, o.y);
+    ctx.fill();
+    ctx.fillStyle = '#7b3f00';
+  });
+}
+
+/* Hearts */
+function drawHearts(){
+  hearts.forEach(h=>{
+    if(!h.taken){
+      ctx.fillStyle = '#ff6fa9';
+      ctx.beginPath();
+      ctx.arc(h.x - scrollX, h.y, h.r, 0, Math.PI*2);
+      ctx.fill();
+      // small shine
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.fillRect(h.x - scrollX - 4, h.y - 6, 6, 3);
+    }
+  });
+}
+
+/* Gift */
+function drawGift(){
+  const gx = gift.x - scrollX;
+  if(!gift.explode){
+    ctx.fillStyle = '#ff66cc';
+    ctx.fillRect(gx, gift.y, gift.w, gift.h);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(gx + gift.w/2 -8, gift.y, 16, gift.h);
+    ctx.fillRect(gx, gift.y + gift.h/2 -8, gift.w, 16);
+  } else {
+    // confetti / hearts + shine + heart rain
+    for(let i=0;i<50;i++){
+      ctx.fillStyle = `hsl(${(gift.frame*10 + i*20) % 360}, 80%, 60%)`;
+      const rx = gx + gift.w/2 + Math.cos(i) * gift.frame * 2.3;
+      const ry = gift.y + gift.h/2 + Math.sin(i) * gift.frame * 2.3;
+      ctx.fillRect(rx, ry, 6, 6);
+    }
+    // heart rain
+    for(let i=0;i<20;i++){
+      ctx.fillStyle = 'pink';
+      const hx = (i*36 + gift.frame*6) % (W-60) + 30;
+      const hy = gift.y - (gift.frame*3) + i*10;
+      ctx.beginPath(); ctx.arc(hx, hy, 6, 0, Math.PI*2); ctx.fill();
+    }
+    // shine glow
+    ctx.fillStyle = 'rgba(255,200,240,0.45)';
+    ctx.beginPath(); ctx.arc(gx + gift.w/2, gift.y + gift.h/2, gift.frame * 6 + 18, 0, Math.PI*2); ctx.fill();
+  }
+}
+
+/* Update logic */
+
+function update(){
+  // store previous position for collision resolution
+  const prevX = player.x;
+  const prevY = player.y;
+
+  // input movement
+  if(keys['ArrowRight']) player.x += 4;
+  if(keys['ArrowLeft']) player.x -= 4;
+
+  // gravity
+  player.vy += 1.2;
+  player.y += player.vy;
+
+  // determine current segment
+  let seg = Math.floor(player.x / segmentWidth);
+  seg = Math.max(0, Math.min(seg, groundHeights.length-1));
+  const groundY = groundHeights[seg];
+
+  // ground collision
+  if(player.y + player.h >= groundY){
+    player.y = groundY - player.h;
+    player.vy = 0;
+    player.onGround = true;
+  } else {
+    player.onGround = false;
+  }
+
+  // improved obstacle collision handling
+  obstacles.forEach(o=>{
+    // AABB overlap test
+    if(player.x < o.x + o.w && player.x + player.w > o.x && player.y < o.y + o.h && player.y + player.h > o.y){
+      // Determine penetration depths
+      const overlapX1 = (player.x + player.w) - o.x; // from left
+      const overlapX2 = (o.x + o.w) - player.x;     // from right
+      const overlapY1 = (player.y + player.h) - o.y; // from top
+      const overlapY2 = (o.y + o.h) - player.y;     // from bottom
+
+      // Find smallest overlap to resolve
+      const minOverlap = Math.min(overlapX1, overlapX2, overlapY1, overlapY2);
+
+      if(minOverlap === overlapY1 && prevY + player.h <= o.y){
+        // landed on top
+        player.y = o.y - player.h;
+        player.vy = 0;
+        player.onGround = true;
+      } else if(minOverlap === overlapX1){
+        // collided from left side -> push left
+        player.x = o.x - player.w - 1;
+        player.vy *= 0.2;
+      } else if(minOverlap === overlapX2){
+        // collided from right side -> push right
+        player.x = o.x + o.w + 1;
+        player.vy *= 0.2;
+      } else {
+        // collided from bottom -> push down
+        player.y = o.y + o.h + 1;
+        player.vy = Math.max(player.vy, 1);
+      }
+    }
+  });
+
+  // hearts collection
+  hearts.forEach(h=>{
+    if(!h.taken && Math.abs((player.x + player.w/2) - h.x) < 28 && Math.abs((player.y + player.h/2) - h.y) < 28){
+      h.taken = true;
+      heartsCollected++;
+      hud.textContent = `⏱ ${timeSec}  |  ❤️ ${heartsCollected}`;
+      // small sound
+      const snd = new Audio('https://cdn.pixabay.com/download/audio/2021/08/04/audio_5f1b2d7a34.mp3?filename=collect-coin-43872.mp3');
+      snd.volume = 0.6; snd.play().catch(()=>{});
+    }
+  });
+
+  // gift collision
+  if(!gift.explode && player.x + player.w > gift.x && player.x < gift.x + gift.w && player.y + player.h > gift.y){
+    gift.explode = true;
+  }
+
+  if(gift.explode){
+    gift.frame++;
+    if(gift.frame > 70){
+      timerRunning = false;
+      // show end screen
+      endScreen.style.display = 'flex';
+      // stop music
+      try{ bgMusic.pause(); }catch(e){}
+    }
+  }
+
+  // scrolling follow player
+  scrollX = player.x - 220;
+  if(scrollX < 0) scrollX = 0;
+  // cap to map end
+  const maxScroll = segmentWidth * (groundHeights.length) - W + 80;
+  if(scrollX > maxScroll) scrollX = maxScroll;
+
+  // HUD update
+  hud.textContent = `⏱ ${timeSec}  |  ❤️ ${heartsCollected}`;
+}
+
+
+/* Render */
+function render(){
+  ctx.clearRect(0,0,W,H);
+  drawDecor();
+  drawTerrain();
+  drawObstacles();
+  drawHearts();
+  drawGift();
+  drawYou();
+  drawPlayer();
+}
+
+/* Main loop */
+function loop(){
+  update();
+  render();
+  requestAnimationFrame(loop);
+}
+loop();
+
+/* Keyboard jump */
+document.addEventListener('keydown', function(e){
+  if((e.key === 'ArrowUp' || e.key === ' ') && player.onGround){
+    player.vy = -16;
+    player.onGround = false;
+  }
+});
+
+/* Mobile jump via keyboard fallback */
+document.addEventListener('keydown', function(e){
+  if(e.key === 'ArrowLeft') keys['ArrowLeft'] = true;
+  if(e.key === 'ArrowRight') keys['ArrowRight'] = true;
+});
+document.addEventListener('keyup', function(e){
+  if(e.key === 'ArrowLeft') keys['ArrowLeft'] = false;
+  if(e.key === 'ArrowRight') keys['ArrowRight'] = false;
+});
+
+/* Replay button */
+replayBtn.addEventListener('click', ()=> location.reload());
+
+/* Friendly: allow initial play on start button for mobile */
+startBtn.addEventListener('click', ()=> {
+  try{ bgMusic.play(); }catch(e){}
+});
+
+/* Prevent scroll when touching controls */
+['touchstart','touchmove'].forEach(ev=>{
+  document.getElementById('controls').addEventListener(ev, e=> e.preventDefault(), {passive:false});
+});
+</script>
+</body>
+</html>
